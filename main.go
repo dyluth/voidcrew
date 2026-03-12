@@ -215,11 +215,11 @@ func (m *Model) updateVisibility() {
 	}
 }
 
-func (m *Model) isTileDangerous(x, y int, ignoreTargetX, ignoreTargetY int) bool {
+func (m *Model) isTileDangerous(x, y int, ignoreTargetX, ignoreTargetY int, isRepairing bool) bool {
 	for _, h := range m.Hazards {
 		if h.X == ignoreTargetX && h.Y == ignoreTargetY { continue }
 		if h.X == x && h.Y == y { return true }
-		if h.Type == HazardFire {
+		if !isRepairing && h.Type == HazardFire {
 			dist := math.Abs(float64(h.X-x)) + math.Abs(float64(h.Y-y))
 			if dist <= 1 { return true }
 		}
@@ -247,7 +247,7 @@ func (m *Model) getNextStep(startX, startY, targetX, targetY int, isRepairing bo
 				if m.Map[next.y][next.x].Char == "#" { continue }
 				ignX, ignY := -1, -1
 				if isRepairing { ignX, ignY = targetX, targetY }
-				if m.isTileDangerous(next.x, next.y, ignX, ignY) { continue }
+				if m.isTileDangerous(next.x, next.y, ignX, ignY, isRepairing) { continue }
 				if _, seen := cameFrom[next]; !seen { cameFrom[next] = curr; queue = append(queue, next) }
 			}
 		}
@@ -276,7 +276,7 @@ func (m *Model) findTargetForExploration(startX, startY int) (int, int, bool) {
 			next := Point{curr.x + d.x, curr.y + d.y}
 			if next.y >= 0 && next.y < len(m.Map) && next.x >= 0 && next.x < len(m.Map[0]) && !visited[next] {
 				visited[next] = true
-				if m.Map[next.y][next.x].Char != "#" && !m.isTileDangerous(next.x, next.y, -1, -1) { 
+				if m.Map[next.y][next.x].Char != "#" && !m.isTileDangerous(next.x, next.y, -1, -1, false) { 
 					queue = append(queue, next) 
 				}
 			}
@@ -302,7 +302,7 @@ func (m *Model) findNearestGatherTarget(startX, startY int, filter ResourceType)
 			next := Point{curr.x + d.x, curr.y + d.y}
 			if next.y >= 0 && next.y < len(m.Map) && next.x >= 0 && next.x < len(m.Map[0]) && !visited[next] {
 				visited[next] = true
-				if m.Map[next.y][next.x].Char != "#" && !m.isTileDangerous(next.x, next.y, -1, -1) { 
+				if m.Map[next.y][next.x].Char != "#" && !m.isTileDangerous(next.x, next.y, -1, -1, false) { 
 					queue = append(queue, next) 
 				}
 			}
@@ -353,17 +353,39 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "down", "s": if m.MenuIndex < 10 { m.MenuIndex++ }
 			case "enter":
 				c := &m.Crew[m.SelectedCrew]
-				// Map Menu Index to OrderType
-				if m.MenuIndex == 0 {
-					c.Order = OrderFixTarget
-				} else if m.MenuIndex == 10 {
-					c.Order = OrderNone
-				} else {
-					c.Order = OrderType(m.MenuIndex)
+				tile := m.Map[m.CursorY][m.CursorX]
+				var hazAtCursor *Hazard
+				for i := range m.Hazards {
+					if m.Hazards[i].X == m.CursorX && m.Hazards[i].Y == m.CursorY {
+						hazAtCursor = &m.Hazards[i]
+						break
+					}
 				}
-				
-				if c.Order == OrderMoveTo || c.Order == OrderFixTarget { 
-					c.TargetX, c.TargetY = m.CursorX, m.CursorY 
+
+				switch m.MenuIndex {
+				case 0: // Context Action
+					isFixable := (hazAtCursor != nil && hazAtCursor.Type != HazardGas) ||
+						(tile.ResType == ResPower && !tile.IsActive) ||
+						(tile.ResType != ResNone && tile.ResType != ResPower)
+					
+					if isFixable {
+						c.Order = OrderFixTarget
+					} else {
+						c.Order = OrderMoveTo
+					}
+				case 1: c.Order = OrderExplore
+				case 2: c.Order = OrderGatherAuto
+				case 3: c.Order = OrderGatherScrap
+				case 4: c.Order = OrderGatherElec
+				case 5: c.Order = OrderGatherFood
+				case 6: c.Order = OrderGatherOxygen
+				case 7: c.Order = OrderRepair
+				case 8: c.Order = OrderVentilate
+				case 9: c.Order = OrderNone
+				}
+
+				if c.Order == OrderMoveTo || c.Order == OrderFixTarget {
+					c.TargetX, c.TargetY = m.CursorX, m.CursorY
 				}
 				m.ShowMenu = false
 			}
@@ -400,7 +422,7 @@ func (m *Model) processTurn() {
 		if m.Map[ry][rx].State != TileHidden && m.Map[ry][rx].Char == "." {
 			hType := HazardBreach; msg := "RED ALERT: HULL BREACH DETECTED!"
 			r := rand.Float32()
-			if r < 0.3 { hType = HazardFire; msg = "RED ALERT: ELECTRICAL FIRE!" } else if r < 0.5 { hType = HazardGas; msg = "RED ALERT: GAS LEAK!" }
+			if r < 0.3 { hType = HazardFire; msg = "RED ALERT: ELECTRICAL FIRE!" } else if r < 0.5 { hType = HazardGas; msg = "RED ALERT: GAS LEAK! Use 'Ventilate Area' at a Console (L)." }
 			m.Hazards = append(m.Hazards, Hazard{Type: hType, X: rx, Y: ry, Integrity: 3, Timer: 15})
 			m.triggerAlert(msg)
 		}
@@ -479,17 +501,34 @@ func (m *Model) processTurn() {
 		}
 
 		isRep := (c.Order == OrderRepair || c.Order == OrderFixTarget)
-		if c.X == c.TargetX && c.Y == c.TargetY {
-			tile := &m.Map[c.Y][c.X]
 			if isRep {
 				fIdx := -1
-				for idx, h := range m.Hazards { if h.X == c.X && h.Y == c.Y { fIdx = idx; break } }
+				for idx, h := range m.Hazards {
+					// Gas is NOT fixable manually
+					if h.Type != HazardGas && h.X == c.X && h.Y == c.Y {
+						fIdx = idx
+						break
+					}
+				}
 				if fIdx != -1 {
 					h := &m.Hazards[fIdx]
-					if h.Type == HazardBreach && m.Scrap < 5 && h.Integrity == 3 { c.Status = "No Scrap" } else {
-						if h.Type == HazardBreach && h.Integrity == 3 { m.Scrap -= 5 }
-						pwr := 1; if c.Class == "Engineer" { pwr = 2 }; h.Integrity -= pwr; c.Status = "Fixing..."
-						if h.Integrity <= 0 { m.Hazards = append(m.Hazards[:fIdx], m.Hazards[fIdx+1:]...); m.addMessage(fmt.Sprintf("%s fixed hazard!", c.Name)); c.Order = OrderNone }
+					if h.Type == HazardBreach && m.Scrap < 5 && h.Integrity == 3 {
+						c.Status = "No Scrap"
+					} else {
+						if h.Type == HazardBreach && h.Integrity == 3 {
+							m.Scrap -= 5
+						}
+						pwr := 1
+						if c.Class == "Engineer" {
+							pwr = 2
+						}
+						h.Integrity -= pwr
+						c.Status = "Fixing..."
+						if h.Integrity <= 0 {
+							m.Hazards = append(m.Hazards[:fIdx], m.Hazards[fIdx+1:]...)
+							m.addMessage(fmt.Sprintf("%s fixed hazard!", c.Name))
+							c.Order = OrderNone
+						}
 					}
 				} else if tile.ResType == ResPower && !tile.IsActive {
 					if m.Electronics >= 10 { m.Electronics -= 10; tile.IsActive = true; tile.Char = "G"; c.Order = OrderNone; c.Status = "Power Online" } else { c.Status = "No Parts" }
@@ -508,7 +547,12 @@ func (m *Model) processTurn() {
 			continue
 		}
 		nextX, nextY := m.getNextStep(c.X, c.Y, c.TargetX, c.TargetY, isRep)
-		c.X, c.Y = nextX, nextY; c.Status = "Moving"
+		if nextX != c.X || nextY != c.Y {
+			c.X, c.Y = nextX, nextY
+			c.Status = "Moving"
+		} else {
+			c.Status = "Path Blocked"
+		}
 	}
 }
 
@@ -568,15 +612,42 @@ func (m Model) View() string {
 	mapPanel := panelStyle.Width(m.Width * 2 / 3).Height(m.Height - 19).Render(mapStr.String())
 	var rightStr strings.Builder
 	if m.ShowMenu {
-		rightStr.WriteString("--- ORDERS ---\n\n")
-		ctxAct := "None"; tile := m.Map[m.CursorY][m.CursorX]
-		isHaz := false; for _, h := range m.Hazards { if h.X == m.CursorX && h.Y == m.CursorY { isHaz = true; break } }
-		if isHaz { ctxAct = "FIX HAZARD AT CURSOR" } else if tile.ResType == ResPower && !tile.IsActive { ctxAct = "REPAIR GENERATOR" } else if tile.ResType != ResNone { ctxAct = "GATHER AT CURSOR" }
-		opts := []string{ctxAct, "Explore (Auto)", "Move To Cursor", "Gather (Auto)", "Gather (Scrap)", "Gather (Elec)", "Gather (Food)", "Gather (Oxygen)", "Repair (Auto)", "Ventilate Area", "None"}
-		for i, opt := range opts {
-			if i == m.MenuIndex { rightStr.WriteString(selectedStyle.Render("> "+opt) + "\n") } else { rightStr.WriteString("  " + opt + "\n") }
+		// Context Action logic
+		var opts []string
+		tile := m.Map[m.CursorY][m.CursorX]
+		var hazAtCursor *Hazard
+		for i := range m.Hazards {
+			if m.Hazards[i].X == m.CursorX && m.Hazards[i].Y == m.CursorY {
+				hazAtCursor = &m.Hazards[i]
+				break
+			}
 		}
-	} else {
+
+		if hazAtCursor != nil {
+			if hazAtCursor.Type == HazardGas {
+				opts = append(opts, "ENTER GAS CLOUD")
+			} else {
+				opts = append(opts, "FIX HAZARD AT CURSOR")
+			}
+		} else if tile.ResType == ResPower && !tile.IsActive {
+			opts = append(opts, "REPAIR GENERATOR")
+		} else if tile.ResType != ResNone && tile.ResType != ResPower {
+			opts = append(opts, "GATHER AT CURSOR")
+		} else {
+			opts = append(opts, "MOVE TO CURSOR")
+		}
+
+		// Fill remaining fixed options
+		opts = append(opts, "Explore (Auto)", "Gather (Auto)", "Gather (Scrap)", "Gather (Elec)", "Gather (Food)", "Gather (Oxygen)", "Repair (Auto)", "Ventilate Area", "None")
+
+		for i, opt := range opts {
+			if i == m.MenuIndex {
+				rightStr.WriteString(selectedStyle.Render("> " + opt) + "\n")
+			} else {
+				rightStr.WriteString("  " + opt + "\n")
+			}
+		}
+		} else {
 		rightStr.WriteString("--- SQUAD ---\n\n")
 		for i, c := range m.Crew {
 			if c.Health <= 0 { rightStr.WriteString(warningStyle.Render(c.Name + " (K.I.A.)") + "\n\n"); continue }
