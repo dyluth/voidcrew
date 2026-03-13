@@ -1,47 +1,39 @@
-# Design Document - VoidCrew
+# Tactical Layer Design - VoidCrew Missions
 
 ## 1. Overview
-
-VoidCrew is a squad-management strategy game set on a derelict space hulk. The player issues persistent orders to a squad of 3-5 crew members. The game progresses in turns (Ticks), where each crew member attempts to fulfill their order until completed or interrupted.
+The Tactical Layer is the core gameplay experience where the player commands a squad on a derelict hulk. It is turn-based and persistent until the mission ends.
 
 ## 2. Core Mechanics
 
-### 2.1 Persistent Orders
-- **Goal-Oriented**: Instead of direct movement, players assign a goal (e.g., "Scavenge at [10, 20]").
-- **Auto-Pathing**: Crew members will move toward their target tile automatically each turn.
-- **Continuous Action**: Once at the target, the crew member will perform the action (Scavenge, Repair, Guard) every turn until the player issues a new order or the task is finished.
+### 2.1 Turn Resolution
+- Actions are sequential. Interrupts (damage, alerts) pause the turn.
+- **Confirmation**: Red Alerts and Idle warnings require `y` to confirm.
 
-### 2.2 Sequential Turn Resolution
-- When the player advances the turn (Tick), each crew member's action is resolved one by one.
-- **Interrupts**: If a crew member encounters a threat (denizen, hazard), their turn ends immediately, and their current order is paused/canceled. The player must decide how to react on the next turn.
+### 2.2 Navigation & Orders
+- **Auto-Explore**: Finds nearest hidden tiles.
+- **Gather (Auto/Specific)**: Intelligent resource gathering based on current ship needs (Oxygen > Food > Scrap).
+- **Search & Destroy**: Prioritizes killing Denizens, then exploring.
+- **Contextual Actions**: The menu dynamically offers the best action for the tile under the cursor (Fix, Repair, Gather, Move).
 
-### 2.3 Map and Fog of War
-- **Map Structure**: A single large grid.
-- **Visibility**: Crew members clear Fog of War (`?`) as they move.
-- **Explored Areas**: Once explored, areas remain visible but dimmed, showing the last known state.
+### 2.3 Environmental Hazards
+- **Hull Breach (`!`)**: Drains Oxygen. Needs Scrap + Repair.
+- **Electrical Fire (`*`)**: Spreads and damages. Needs Repair. Firefighters project a "Firebreak" safety zone.
+- **Toxic Gas (`~`)**: Damage over time. Cleared by `Ventilate` at a Console (`L`).
+- **Infested Tunnel (`&`)**: Spawns Mites. Needs Scrap + Repair.
 
-### 2.4 Resource Management
-- **Oxygen/Rations**: Drains every Tick.
-- **Scrap/Electronics**: Gained from the "Scavenge" order.
+### 2.4 Status & Survival
+- **Oxygen**: Depletes per crew member + per breach. At 0, causes `SUFFOCATING` (HP damage).
+- **Rations**: Consumed only to heal injuries (1 HP = 1 Ration). If 0, causes `STARVING` (HP damage).
+- **HP**: If 0, character is K.I.A.
 
-## 3. UI Panels
-
-### 3.1 Map Panel (Left/Center)
-- Displays the grid, crew locations (`@`), and their current targets (`X`).
-
-### 3.2 Inspection/Order Panel (Right)
-- **Status**: Shows crew health, skills, and the active persistent order.
-- **Order Menu**: A CLI-style menu to change the selected crew member's goal.
-
-### 3.3 Message Panel (Bottom)
-- Sequential log: 
-  1. "Hicks moved toward Reactor."
-  2. "Ripley is scavenging... Found 2 Scrap."
-  3. "WARNING: Hicks encountered a Lifeform! Order cancelled."
-
-## 4. Input Controls
-- `Tab`: Cycle through crew members.
-- `Enter/Space`: Advance Turn (Process one Tick).
-- `o`: Toggle Order Menu.
-- `w/a/s/d`: Move target cursor (when selecting a destination).
-- `q`: Quit.
+## 3. Map Representation
+- **`@`**: Crew Member (Color coded by selection).
+- **`#`**: Wall.
+- **`.`**: Floor.
+- **`E`**: Airlock (Start/Evacuation point).
+- **`%`**: Material Cache (Scrap/Electronics).
+- **`V`**: Hydroponics (Food).
+- **`L`**: Life Support Console (Oxygen/Ventilation).
+- **`G`**: Power Generator (Electronics needed to fix).
+- **`m`**: Void Mite.
+- **`?`**: Fog of War.

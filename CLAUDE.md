@@ -4,28 +4,31 @@ This document provides specialized guidance for AI agents working on the VoidCre
 
 ## Architecture
 
-- **Framework**: `github.com/charmbracelet/bubbletea` (Tea model-update-view).
-- **Styling**: `github.com/charmbracelet/lipgloss` for panel layout and colors.
-- **State Management**: The `Model` is the central source of truth. The `Update` function must be kept clean, delegating complex logic to specialized sub-packages (e.g., `game`, `ui`, `map`).
-
-## Key Symbols & Entities
-
-- **@**: Crew Member (Persistent, unique).
-- **#**: Unbroken Wall / Hull.
-- **X**: Damaged Hull (Requires repair).
-- **%**: Resource Cache (Scrap, Electronics).
-- **.**: Explored Floor.
-- **?**: Unknown Area (Fog of War).
+- **State Management**: The game uses a multi-view `Model`.
+    - `ActiveView`: Enum (ViewHub, ViewMission, ViewStarmap, etc.).
+    - `HubState`: Persistent data (Global Roster, Global Resources).
+    - `MissionState`: Transient data (Tactical Map, Hazards, Denizens).
+- **Persistence**: Save/Load squad and resources using JSON serialization.
+- **Framework**: `github.com/charmbracelet/bubbletea`.
+- **Styling**: `github.com/charmbracelet/lipgloss`.
 
 ## Design Philosophy
 
-1. **Simplicity First**: The map is a single large grid initially. Focus on the core resource loop before adding multiple levels.
-2. **Atmospheric TUI**: Use high-contrast ASCII and minimal but effective color styling (e.g., dim gray for fog, vibrant red for critical alerts).
-3. **Turn-Based Integrity**: Each action must advance the game state precisely by one "Tick".
-4. **Permanent Consequences**: Crew members are precious. Death should be impactful.
+1.  **Risk/Reward Strategy**: The Meta-game is about choosing the right crew for the right job and knowing when to evacuate.
+2.  **Turn-Based Depth**: The Tactical layer remains deterministic and sequential.
+3.  **Visual Language**:
+    - **Header**: Critical ship resources.
+    - **Sidebar**: Detailed squad status and effects.
+    - **Alerts**: Explicit confirmation required for bad events.
 
-## Common Tasks
+## Key Meta-Data
 
-- **Adding a new command**: Register a keybinding in the `Update` function and add a corresponding menu item in the CLI-style menu.
-- **Modifying UI layout**: Use Lip Gloss `JoinHorizontal` and `JoinVertical` to adjust the three-panel layout.
-- **Resource Management**: All resources (Power, Oxygen, etc.) should be handled within a central `GameState` struct.
+- **Airlock (`E`)**: Primary spawn and exit point.
+- **Mite Tunnel (`&`)**: Spawner hazard. Must be sealed with Scrap.
+- **Status Effects**: `STARVING`, `SUFFOCATING`, etc. recorded in `CrewMember.Effects`.
+
+## Tactical Logic Notes
+
+- **Firebreaks**: Firefighting crew members protect adjacent tiles from spread.
+- **Repair Immunity**: Crew are immune to the hazard they are currently fixing.
+- **Context Actions**: Menu index 0 is always the most relevant action for the cursor position.
